@@ -2862,8 +2862,12 @@ const CoverFlowRow = ({ games, onSelect, cardWidth = 168, flowKey }) => {
       const rotateY = Math.max(-55, Math.min(55, -offset * 30));
       const scale = Math.max(0.76, 1 - abs * 0.10);
       const translateZ = -Math.min(140, abs * 45);
-      // Pull back cards a little toward focus so the stack reads tighter
-      const translateX = offset > 0 ? -Math.min(28, abs * 12) : Math.min(28, abs * 12);
+      // Keep the immediately-adjacent card at its natural position (breathing
+      // room next to the focused card) and only start pulling cards inward
+      // from the 3rd onward, so the stack reads tight further out.
+      const pullStart = 1; // no pull until offset exceeds 1
+      const pullAmount = Math.max(0, abs - pullStart) * 18;
+      const translateX = offset > 0 ? -Math.min(36, pullAmount) : Math.min(36, pullAmount);
       const opacity = Math.max(0.4, 1 - abs * 0.22);
       el.style.transform = `translate3d(${translateX}px, 0, ${translateZ}px) rotateY(${rotateY}deg) scale(${scale})`;
       el.style.opacity = opacity;
