@@ -2533,6 +2533,8 @@ const Icon = ({ name, className = 'w-5 h-5', style, filled }) => {
     replay:   <><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 3v6h6"/></>,
     clock:    <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
     chevron:  <path d="m6 9 6 6 6-6"/>,
+    arrowUp:  <path d="m6 15 6-6 6 6"/>,
+    arrowDown:<path d="m6 9 6 6 6-6"/>,
     edit:     <><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></>,
     trash:    <><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"/></>,
     download: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></>,
@@ -2834,29 +2836,38 @@ const ListView = ({ groups, formatRight, formatSubtitle, onSelect, accentColor =
 // its right are tilted inward and stacked back. Snap-scroll lands each
 // card flush with the left.
 const COVER_FLOW_LEFT_PAD = 20; // matches px-5 of the section header
+const COVER_FLOW_GAP = 8;       // tighter spacing — back cards stack closer
 
-const CoverFlowRow = ({ games, onSelect, cardWidth = 168 }) => {
+const CoverFlowRow = ({ games, onSelect, cardWidth = 168, flowKey }) => {
   const containerRef = useRef(null);
   const cardRefs = useRef({});
 
   const updateTransforms = () => {
     const container = containerRef.current;
     if (!container) return;
-    // Focus point sits at COVER_FLOW_LEFT_PAD from the container's left edge
     const focusX = container.scrollLeft + COVER_FLOW_LEFT_PAD;
     Object.entries(cardRefs.current).forEach(([id, el]) => {
       if (!el) return;
-      // Measure each card's LEFT edge against focus, in card-widths
       const offset = (el.offsetLeft - focusX) / el.offsetWidth;
       const abs = Math.min(Math.abs(offset), 4);
-      // Cards to the right (positive offset) tilt to face the focus on their left
+
+      // Focused card: identity transform — no 3D weirdness, taps go through cleanly
+      if (abs < 0.04) {
+        el.style.transform = 'translate3d(0,0,0)';
+        el.style.opacity = '1';
+        el.style.zIndex = '40';
+        return;
+      }
+
       const rotateY = Math.max(-55, Math.min(55, -offset * 30));
       const scale = Math.max(0.76, 1 - abs * 0.10);
       const translateZ = -Math.min(140, abs * 45);
+      // Pull back cards a little toward focus so the stack reads tighter
+      const translateX = offset > 0 ? -Math.min(28, abs * 12) : Math.min(28, abs * 12);
       const opacity = Math.max(0.4, 1 - abs * 0.22);
-      el.style.transform = `translateZ(${translateZ}px) rotateY(${rotateY}deg) scale(${scale})`;
+      el.style.transform = `translate3d(${translateX}px, 0, ${translateZ}px) rotateY(${rotateY}deg) scale(${scale})`;
       el.style.opacity = opacity;
-      el.style.zIndex = abs < 0.3 ? 30 : abs < 1.2 ? 20 : 10;
+      el.style.zIndex = abs < 1.2 ? 20 : 10;
     });
   };
 
@@ -2881,20 +2892,22 @@ const CoverFlowRow = ({ games, onSelect, cardWidth = 168 }) => {
   return (
     <div
       ref={containerRef}
+      data-flowkey={flowKey}
       className="overflow-x-auto no-scrollbar"
       style={{
         scrollSnapType: 'x mandatory',
         scrollBehavior: 'smooth',
         scrollPaddingInlineStart: `${COVER_FLOW_LEFT_PAD}px`,
         paddingLeft: `${COVER_FLOW_LEFT_PAD}px`,
-        // Right padding lets the last card scroll all the way to the focus position
-        paddingRight: `calc(100% - ${cardWidth + COVER_FLOW_LEFT_PAD}px)`,
+        // Right padding generous enough that the LAST card can scroll all the way
+        // to the focus position — was tight before, causing it not to fully snap.
+        paddingRight: `calc(100% - ${cardWidth}px - ${COVER_FLOW_LEFT_PAD}px + 32px)`,
         paddingTop: '20px',
         paddingBottom: '20px',
         perspective: '1200px',
       }}
     >
-      <div className="flex gap-3 items-center" style={{ transformStyle: 'preserve-3d' }}>
+      <div className="flex items-center" style={{ gap: `${COVER_FLOW_GAP}px`, transformStyle: 'preserve-3d' }}>
         {games.map(g => (
           <div
             key={g.id}
@@ -2903,9 +2916,9 @@ const CoverFlowRow = ({ games, onSelect, cardWidth = 168 }) => {
             style={{
               width: `${cardWidth}px`,
               scrollSnapAlign: 'start',
-              willChange: 'transform, opacity',
               transition: 'transform 140ms ease-out, opacity 140ms ease-out',
               transformOrigin: 'left center',
+              touchAction: 'manipulation',
             }}
           >
             <GameCard game={g} onClick={() => onSelect(g)} />
@@ -2937,7 +2950,7 @@ const Top50View = ({ games, onSelect }) => {
             {group.key}
             <span className="text-zinc-500 text-[14px] ml-2 tabular-nums">{group.games.length}</span>
           </div>
-          <CoverFlowRow games={group.games} onSelect={onSelect} />
+          <CoverFlowRow games={group.games} onSelect={onSelect} flowKey={`top50-${group.key}`} />
         </div>
       ))}
     </div>
@@ -2976,31 +2989,64 @@ const UpcomingView = ({ games, onSelect }) => {
   }, [games]);
 
   return (
-    <div className="px-4 space-y-6 pb-32">
+    <div className="space-y-4 pb-32">
       {groups.map(g => (
         <div key={g.key}>
-          <div className="serif text-[22px] mb-3 px-1" style={{ color: '#d4a574' }}>{g.key}</div>
-          <div className="grid grid-cols-2 gap-3">
-            {g.games.map(game => (
-              <GameCard key={game.id} game={game} onClick={() => onSelect(game)} />
-            ))}
+          <div className="serif text-[22px] mb-1 px-5" style={{ color: '#d4a574' }}>
+            {g.key}
+            <span className="text-zinc-500 text-[14px] ml-2 tabular-nums">{g.games.length}</span>
           </div>
+          <CoverFlowRow games={g.games} onSelect={onSelect} flowKey={`upcoming-${g.key}`} />
         </div>
       ))}
     </div>
   );
 };
 
-const RumoredView = ({ games, onSelect }) => {
+const RumoredView = ({ games, onSelect, onReorder }) => {
   const list = useMemo(() => games.filter(g => g.state === 'rumored'), [games]);
   return (
-    <ListView
-      groups={[{ key: null, games: list }]}
-      onSelect={onSelect}
-      formatSubtitle={g => g.notes}
-      formatRight={() => 'TBD'}
-      accentColor="#9ea0a8"
-    />
+    <div className="px-4 pb-32">
+      <div className="glass rounded-3xl overflow-hidden divide-y divide-white/5">
+        {list.map((game, i) => (
+          <div
+            key={game.id}
+            className="w-full px-2 py-1.5 flex items-center gap-1 hover:bg-white/5 transition-colors"
+          >
+            <div className="flex flex-col">
+              <button
+                onClick={() => onReorder(game.id, -1)}
+                disabled={i === 0}
+                className={`p-1 rounded ${i === 0 ? 'opacity-25' : 'hover:bg-white/10 active:bg-white/15'}`}
+                aria-label="Move up"
+              >
+                <Icon name="arrowUp" className="w-3.5 h-3.5 text-zinc-400" />
+              </button>
+              <button
+                onClick={() => onReorder(game.id, +1)}
+                disabled={i === list.length - 1}
+                className={`p-1 rounded ${i === list.length - 1 ? 'opacity-25' : 'hover:bg-white/10 active:bg-white/15'}`}
+                aria-label="Move down"
+              >
+                <Icon name="arrowDown" className="w-3.5 h-3.5 text-zinc-400" />
+              </button>
+            </div>
+            <button
+              onClick={() => onSelect(game)}
+              className="flex-1 text-left px-2 py-2 min-w-0"
+            >
+              <div className="serif text-[17px] leading-tight truncate">{game.title}</div>
+              {game.notes && (
+                <div className="text-[12px] text-zinc-500 mt-0.5 truncate">{game.notes}</div>
+              )}
+            </button>
+            <div className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium shrink-0 pr-2">
+              TBD
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 };
 
@@ -3267,8 +3313,24 @@ const RecentReleaseBanner = ({ games, onSelect }) => {
 // =============================================================================
 // LIBRARY SCREEN
 // =============================================================================
-const LibraryScreen = ({ games, onSelect, section, setSection, enrichStatus, onAdd, onExport }) => {
+const LibraryScreen = ({ games, onSelect, section, setSection, enrichStatus, onAdd, onExport, onReorderRumored, savedScrollsRef }) => {
   const [query, setQuery] = useState('');
+
+  // Restore scroll positions captured before opening a detail screen
+  useEffect(() => {
+    if (!savedScrollsRef?.current) return;
+    // Two RAFs: first lets layout settle, second lets cover-flow rows mount
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const s = savedScrollsRef.current;
+      if (!s) return;
+      window.scrollTo(0, s.y);
+      document.querySelectorAll('[data-flowkey]').forEach(el => {
+        const x = s.rows[el.dataset.flowkey];
+        if (x != null) el.scrollLeft = x;
+      });
+      savedScrollsRef.current = null;
+    }));
+  }, []);
 
   const counts = useMemo(() => ({
     top50:       games.filter(g => g.topListRank != null).length,
@@ -3327,7 +3389,7 @@ const LibraryScreen = ({ games, onSelect, section, setSection, enrichStatus, onA
         {section === 'top50'       && <Top50View games={filtered} onSelect={onSelect} />}
         {section === 'playing'     && <PlayingView games={filtered} onSelect={onSelect} />}
         {section === 'upcoming'    && <UpcomingView games={filtered} onSelect={onSelect} />}
-        {section === 'rumored'     && <RumoredView games={filtered} onSelect={onSelect} />}
+        {section === 'rumored'     && <RumoredView games={filtered} onSelect={onSelect} onReorder={onReorderRumored} />}
         {section === 'recommended' && <RecommendedView games={filtered} onSelect={onSelect} />}
         {section === 'played'      && <PlayedView games={filtered} onSelect={onSelect} />}
       </div>
@@ -3439,7 +3501,7 @@ const Sheet = ({ open, onClose, title, leftAction, rightAction, children }) => {
 // =============================================================================
 // FORM BITS
 // =============================================================================
-const ALL_STATES = ['rumored', 'upcoming', 'playing', 'recommended', 'played'];
+const ALL_STATES = ['rumored', 'upcoming', 'recommended', 'playing', 'played'];
 
 const StateSelector = ({ value, onChange }) => (
   <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1">
@@ -3907,6 +3969,9 @@ const GameDetailScreen = ({ game, onBack, onEdit }) => {
   const tier = game.rating ? TIER(game.rating.total) : null;
   const color = tier?.color || '#a1a1aa';
 
+  // Always start detail screens at the top of the page
+  useEffect(() => { window.scrollTo(0, 0); }, [game.id]);
+
   const cover = effectiveCover(game);
   return (
     <div className="screen-enter pb-32">
@@ -4114,6 +4179,34 @@ const App = () => {
   };
   const editGame = useMemo(() => games.find(g => g.id === editId), [games, editId]);
 
+  // Swap a Rumored game with its neighbor in the array (direction: -1 up, +1 down)
+  const reorderRumored = (id, direction) => {
+    setGames(prev => {
+      const idx = prev.findIndex(g => g.id === id);
+      if (idx < 0) return prev;
+      // Find next/prev game also in 'rumored' state
+      let neighborIdx = idx + direction;
+      while (neighborIdx >= 0 && neighborIdx < prev.length && prev[neighborIdx].state !== 'rumored') {
+        neighborIdx += direction;
+      }
+      if (neighborIdx < 0 || neighborIdx >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[neighborIdx]] = [next[neighborIdx], next[idx]];
+      return next;
+    });
+  };
+
+  // Save scroll positions before opening Detail; LibraryScreen restores on remount
+  const savedScrollsRef = useRef(null);
+  const openDetail = (id) => {
+    const rows = {};
+    document.querySelectorAll('[data-flowkey]').forEach(el => {
+      rows[el.dataset.flowkey] = el.scrollLeft;
+    });
+    savedScrollsRef.current = { y: window.scrollY, rows };
+    setSelectedId(id);
+  };
+
   useEffect(() => { saveGames(games); }, [games]);
 
   // RAWG enrichment — fires once on mount, fetches metadata for games
@@ -4179,12 +4272,14 @@ const App = () => {
           {tab === 'library' && (
             <LibraryScreen
               games={games}
-              onSelect={g => setSelectedId(g.id)}
+              onSelect={g => openDetail(g.id)}
               section={section}
               setSection={setSection}
               enrichStatus={enrichStatus}
               onAdd={() => setAddOpen(true)}
               onExport={() => exportLibrary(games)}
+              onReorderRumored={reorderRumored}
+              savedScrollsRef={savedScrollsRef}
             />
           )}
           {tab === 'news' && <NewsScreen />}
