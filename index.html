@@ -1479,7 +1479,7 @@ const SEED_GAMES = [
     "title": "Star Fox",
     "state": "upcoming",
     "expectedDate": "6/25",
-    "notes": "Pre-ordered Amazon"
+    "notes": "Pre-ordered • Amazon"
   },
   {
     "id": "directive-8020",
@@ -2362,12 +2362,18 @@ const CATEGORIES = [
   { key: 'value',       label: 'Value',      full: 'Value' },
 ];
 
+// Tier colors — distinct medal-style: Gold / Bronze / Steel
 const TIER = (score) => {
-  if (score >= 100) return { label: 'Masterpiece', color: '#d4a574' };
-  if (score >= 90)  return { label: 'Amazing',     color: '#c4b8a8' };
-  if (score >= 80)  return { label: 'Great',       color: '#9ea0a8' };
-  if (score >= 70)  return { label: 'Good',        color: '#7d7f88' };
-  return { label: 'Mixed', color: '#6d6f78' };
+  if (score >= 100) return { label: 'Masterpiece', color: '#e2b878' }; // rich gold
+  if (score >= 90)  return { label: 'Amazing',     color: '#b87349' }; // warm bronze/copper
+  if (score >= 80)  return { label: 'Great',       color: '#7a8a99' }; // cool steel blue-grey
+  if (score >= 70)  return { label: 'Good',        color: '#5d6770' };
+  return { label: 'Mixed', color: '#4a5260' };
+};
+const TIER_COLOR_FOR_LABEL = {
+  Masterpiece: '#e2b878',
+  Amazing:     '#b87349',
+  Great:       '#7a8a99',
 };
 
 const STATE_META = {
@@ -2428,7 +2434,7 @@ const parseExpected = (s) => {
   return { sortKey: 9999, label: s };
 };
 
-const STORAGE_KEY = 'vgl.games.v3';
+const STORAGE_KEY = 'vgl.games.v4';
 const loadGames = () => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -2455,7 +2461,11 @@ const yearOf = (released) => {
   return isNaN(y) ? null : y;
 };
 
-// Search RAWG for a game by title, pick best match (closest year if available)
+// Search RAWG for a game by title, pick best match (closest year if available).
+// Rejects matches whose release year is >5 years off from the target year —
+// this prevents unannounced sequels like "Star Fox 2026" from matching the
+// 1993 SNES Star Fox.
+const YEAR_MATCH_TOLERANCE = 5;
 const searchRawg = async (title, year) => {
   const q = encodeURIComponent(title);
   const url = `${RAWG_BASE}/games?key=${RAWG_KEY}&search=${q}&page_size=5&search_precise=true`;
@@ -2473,6 +2483,11 @@ const searchRawg = async (title, year) => {
       const bd = by ? Math.abs(by - year) : 999;
       return ad - bd;
     });
+    const best = results[0];
+    const bestYear = yearOf(best.released);
+    if (bestYear && Math.abs(bestYear - year) > YEAR_MATCH_TOLERANCE) {
+      return null; // too far apart, almost certainly a different game
+    }
   }
   return results[0];
 };
@@ -2492,6 +2507,7 @@ const Icon = ({ name, className = 'w-5 h-5', style, filled }) => {
     trophy:   <><path d="M7 4h10v3a5 5 0 0 1-10 0V4z"/><path d="M7 4H4v3a3 3 0 0 0 3 3M17 4h3v3a3 3 0 0 1-3 3M10 14h4v4h-4zM8 21h8"/></>,
     replay:   <><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 3v6h6"/></>,
     clock:    <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
+    chevron:  <path d="m6 9 6 6 6-6"/>,
   };
   return (
     <svg className={className} style={style} viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -2587,24 +2603,44 @@ const GameCard = ({ game, onClick }) => {
   const isTop50 = game.topListRank != null;
   const hasCover = !!game.coverImage;
 
-  // State-specific top-right badge
-  let cornerBadge = null;
-  if (game.state === 'playing') {
-    cornerBadge = (
+  // TOP-LEFT state tag (consistent across sections)
+  let leftBadge = null;
+  if (isTop50) {
+    leftBadge = (
+      <div className="glass-light rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wider uppercase" style={{ color: tier.color }}>
+        #{game.topListRank}
+      </div>
+    );
+  } else if (game.state === 'playing') {
+    leftBadge = (
       <div className="glass-light rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wider uppercase text-emerald-300">
         Playing
       </div>
     );
-  } else if (game.state === 'upcoming') {
-    cornerBadge = (
-      <div className="glass-light rounded-full px-2 py-0.5 text-[10px] font-medium text-zinc-200">
-        {shortDateLabel(game.expectedDate)}
+  } else if (game.state === 'upcoming' && game.notes) {
+    // Insert a bullet after "Pre-ordered " if it isn't already there
+    const noteText = game.notes.startsWith('Pre-ordered ') && !game.notes.includes('•')
+      ? game.notes.replace('Pre-ordered ', 'Pre-ordered • ')
+      : game.notes;
+    leftBadge = (
+      <div className="glass-light rounded-full px-2 py-0.5 text-[10px] font-medium tracking-wide text-zinc-200">
+        {noteText}
       </div>
     );
   } else if (game.state === 'recommended') {
+    leftBadge = (
+      <div className="glass-light rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wider uppercase text-zinc-300">
+        Recommended
+      </div>
+    );
+  }
+
+  // TOP-RIGHT — only Recommended hours
+  let rightBadge = null;
+  if (game.state === 'recommended') {
     const hrs = game.timeToBeat || game.rawgPlaytime;
     if (hrs) {
-      cornerBadge = (
+      rightBadge = (
         <div className="glass-light rounded-full px-2 py-0.5 text-[10px] font-medium text-zinc-200">
           ~{hrs} hrs
         </div>
@@ -2612,14 +2648,21 @@ const GameCard = ({ game, onClick }) => {
     }
   }
 
-  // Bottom meta line — varies by state
-  const year = primaryYear(game);
+  // Bottom meta line — full date for Upcoming, year+platform for others
   const plat = primaryPlatform(game);
+  const year = primaryYear(game);
   let metaLine = '';
-  if (game.state === 'upcoming' && game.notes) metaLine = game.notes;
-  else metaLine = [year, plat].filter(Boolean).join(' · ');
+  if (game.state === 'upcoming') {
+    const dateLabel = parseExpected(game.expectedDate).label;
+    // Skip the date when the section header already conveys it
+    // (Available → "Available now" header; year-only → year header)
+    const dateIsRedundant = game.expectedDate === 'Available' || /^\d{4}$/.test(dateLabel);
+    metaLine = dateIsRedundant ? plat : [dateLabel, plat].filter(Boolean).join(' · ');
+  } else {
+    metaLine = [year, plat].filter(Boolean).join(' · ');
+  }
 
-  // Playing screens also show RAWG playtime as a small line under title
+  // Playing also gets a HLTB-style playtime line under title
   const showPlaytime = game.state === 'playing' && game.rawgPlaytime;
 
   return (
@@ -2636,13 +2679,8 @@ const GameCard = ({ game, onClick }) => {
       )}
       <div className="absolute inset-0 flex flex-col justify-between p-3">
         <div className="flex items-start justify-between gap-2">
-          {isTop50 ? (
-            <div className="glass-light rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wider uppercase flex items-center gap-1">
-              <Icon name="star" className="w-3 h-3" style={{ color: tier?.color }} />
-              <span style={{ color: tier?.color }}>#{game.topListRank}</span>
-            </div>
-          ) : <div />}
-          {cornerBadge}
+          {leftBadge || <div />}
+          {rightBadge || <div />}
         </div>
 
         <div className="glass rounded-xl px-3 py-2.5">
@@ -2654,12 +2692,12 @@ const GameCard = ({ game, onClick }) => {
             </div>
           )}
           {(metaLine || game.rating) && (
-            <div className="flex items-center justify-between mt-1.5">
-              <div className="text-[10px] uppercase tracking-wider text-zinc-400 font-medium truncate">
+            <div className="flex items-start justify-between mt-1.5 gap-2">
+              <div className="text-[10px] uppercase tracking-wide text-zinc-400 font-medium leading-tight">
                 {metaLine}
               </div>
               {game.rating && (
-                <div className="text-[13px] font-semibold tabular-nums shrink-0 ml-2" style={{ color: tier.color }}>
+                <div className="text-[13px] font-semibold tabular-nums shrink-0" style={{ color: tier.color }}>
                   {game.rating.total}
                 </div>
               )}
@@ -2768,13 +2806,30 @@ const ListView = ({ groups, formatRight, formatSubtitle, onSelect, accentColor =
 // =============================================================================
 
 const Top50View = ({ games, onSelect }) => {
-  const list = useMemo(
-    () => games.filter(g => g.topListRank != null).sort((a, b) => a.topListRank - b.topListRank),
-    [games]
-  );
+  const groups = useMemo(() => {
+    const list = games.filter(g => g.topListRank != null).sort((a, b) => a.topListRank - b.topListRank);
+    const buckets = { Masterpiece: [], Amazing: [], Great: [] };
+    list.forEach(g => {
+      const tier = TIER(g.rating.total);
+      if (buckets[tier.label]) buckets[tier.label].push(g);
+    });
+    return ['Masterpiece', 'Amazing', 'Great']
+      .filter(k => buckets[k].length > 0)
+      .map(k => ({ key: k, games: buckets[k] }));
+  }, [games]);
+
   return (
-    <div className="px-4 pb-32 grid grid-cols-2 gap-3">
-      {list.map(g => <GameCard key={g.id} game={g} onClick={() => onSelect(g)} />)}
+    <div className="px-4 space-y-6 pb-32">
+      {groups.map(group => (
+        <div key={group.key}>
+          <div className="serif text-[22px] mb-3 px-1" style={{ color: TIER_COLOR_FOR_LABEL[group.key] }}>
+            {group.key}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {group.games.map(g => <GameCard key={g.id} game={g} onClick={() => onSelect(g)} />)}
+          </div>
+        </div>
+      ))}
     </div>
   );
 };
@@ -2840,7 +2895,11 @@ const RumoredView = ({ games, onSelect }) => {
 };
 
 const RecommendedView = ({ games, onSelect }) => {
-  const list = useMemo(() => games.filter(g => g.state === 'recommended'), [games]);
+  const list = useMemo(() => {
+    const ls = games.filter(g => g.state === 'recommended');
+    ls.sort((a, b) => (primaryYear(b) || 0) - (primaryYear(a) || 0));
+    return ls;
+  }, [games]);
   return (
     <div className="px-4 pb-32 grid grid-cols-2 gap-3">
       {list.map(g => <GameCard key={g.id} game={g} onClick={() => onSelect(g)} />)}
@@ -2848,62 +2907,195 @@ const RecommendedView = ({ games, onSelect }) => {
   );
 };
 
+// Native-styled sort/filter button — wraps an invisible <select> so iOS
+// shows its native picker on tap. Clean, accessible, zero JS work.
+const SortFilterSelect = ({ label, value, onChange, options, groups }) => {
+  const flat = [
+    ...options,
+    ...((groups || []).flatMap(g => g.options)),
+  ];
+  const displayLabel = flat.find(o => o[0] === value)?.[1] || '—';
+  return (
+    <div className="relative glass-light rounded-full px-3 py-1.5 flex items-center gap-1.5 text-[12px]">
+      <span className="text-zinc-500 uppercase tracking-wider font-medium">{label}</span>
+      <span className="text-zinc-100 font-medium">{displayLabel}</span>
+      <Icon name="chevron" className="w-3 h-3 text-zinc-400" />
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="absolute inset-0 opacity-0 cursor-pointer"
+      >
+        {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        {(groups || []).map(g => (
+          <optgroup key={g.label} label={g.label}>
+            {g.options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </optgroup>
+        ))}
+      </select>
+    </div>
+  );
+};
+
 const PlayedView = ({ games, onSelect }) => {
-  // ALL played games (Top 50 + others), grouped by year
-  const groups = useMemo(() => {
-    const list = games.filter(g => g.state === 'played');
-    list.sort((a, b) => {
-      const yearDiff = (b.year || 0) - (a.year || 0);
-      if (yearDiff !== 0) return yearDiff;
-      // Within same year: Top 50 first (by rank ascending), then alphabetical
-      const ar = a.topListRank ?? 999;
-      const br = b.topListRank ?? 999;
-      if (ar !== br) return ar - br;
-      return a.title.localeCompare(b.title);
+  const [sort, setSort] = useState('yearDesc');
+  const [filter, setFilter] = useState('all');
+
+  // Dynamic console + year option lists from the data
+  const { consoles, years } = useMemo(() => {
+    const cs = new Set(), ys = new Set();
+    games.forEach(g => {
+      if (g.state !== 'played') return;
+      const p = primaryPlatform(g);
+      if (p) cs.add(p);
+      if (g.year) ys.add(g.year);
     });
-    const buckets = {};
-    list.forEach(g => {
-      const key = g.year ? String(g.year) : 'Year unknown';
-      (buckets[key] = buckets[key] || []).push(g);
-    });
-    return Object.keys(buckets)
-      .sort((a, b) => (parseInt(b) || 0) - (parseInt(a) || 0))
-      .map(k => ({ key: k, games: buckets[k] }));
+    return {
+      consoles: [...cs].sort((a, b) => {
+        const platformOrderIdx = (short) => {
+          const i = PLATFORM_PRIORITY.findIndex(p => shortPlatform(p) === short);
+          return i === -1 ? 999 : i;
+        };
+        return platformOrderIdx(a) - platformOrderIdx(b);
+      }),
+      years: [...ys].sort((a, b) => b - a),
+    };
   }, [games]);
 
+  // FILTER
+  const filtered = useMemo(() => {
+    const list = games.filter(g => g.state === 'played');
+    if (filter === 'all') return list;
+    if (filter === 'top50') return list.filter(g => g.topListRank != null);
+    if (filter === 'masterpiece') return list.filter(g => (g.rating?.total ?? 0) >= 100);
+    if (filter === 'outsideTop50') return list.filter(g => g.topListRank == null);
+    if (filter.startsWith('console:')) {
+      const p = filter.slice(8);
+      return list.filter(g => primaryPlatform(g) === p);
+    }
+    if (filter.startsWith('year:')) {
+      const y = parseInt(filter.slice(5), 10);
+      return list.filter(g => g.year === y);
+    }
+    return list;
+  }, [games, filter]);
+
+  // SORT + GROUP — group key depends on sort mode
+  const groups = useMemo(() => {
+    const list = [...filtered];
+
+    const consoleIdx = (g) => {
+      const p = primaryPlatform(g);
+      const i = PLATFORM_PRIORITY.findIndex(x => shortPlatform(x) === p);
+      return i === -1 ? 999 : i;
+    };
+
+    if (sort === 'yearDesc') {
+      list.sort((a, b) => ((b.year || 0) - (a.year || 0)) || ((a.topListRank ?? 999) - (b.topListRank ?? 999)));
+    } else if (sort === 'yearAsc') {
+      list.sort((a, b) => ((a.year || 0) - (b.year || 0)) || ((a.topListRank ?? 999) - (b.topListRank ?? 999)));
+    } else if (sort === 'console') {
+      list.sort((a, b) => (consoleIdx(a) - consoleIdx(b)) || ((b.year || 0) - (a.year || 0)));
+    } else if (sort === 'rating') {
+      list.sort((a, b) => (b.rating?.total ?? -1) - (a.rating?.total ?? -1));
+    }
+
+    let keyFn, sortKeys;
+    if (sort === 'yearDesc' || sort === 'yearAsc') {
+      keyFn = g => g.year ? String(g.year) : 'Year unknown';
+      sortKeys = sort === 'yearDesc'
+        ? (a, b) => (parseInt(b) || 0) - (parseInt(a) || 0)
+        : (a, b) => (parseInt(a) || 0) - (parseInt(b) || 0);
+    } else if (sort === 'console') {
+      keyFn = g => primaryPlatform(g) || 'Unknown';
+      sortKeys = (a, b) => {
+        const ai = PLATFORM_PRIORITY.findIndex(p => shortPlatform(p) === a);
+        const bi = PLATFORM_PRIORITY.findIndex(p => shortPlatform(p) === b);
+        return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+      };
+    } else { // rating
+      keyFn = g => g.rating ? TIER(g.rating.total).label : 'Unrated';
+      const order = ['Masterpiece', 'Amazing', 'Great', 'Good', 'Mixed', 'Unrated'];
+      sortKeys = (a, b) => order.indexOf(a) - order.indexOf(b);
+    }
+
+    const buckets = {};
+    list.forEach(g => {
+      const k = keyFn(g);
+      (buckets[k] = buckets[k] || []).push(g);
+    });
+    return Object.keys(buckets).sort(sortKeys).map(k => ({ key: k, games: buckets[k] }));
+  }, [filtered, sort]);
+
+  const groupColor = (key) => TIER_COLOR_FOR_LABEL[key] || '#d4a574';
+
   return (
-    <div className="px-4 space-y-6 pb-32">
-      {groups.map(group => (
-        <div key={group.key}>
-          <div className="serif text-[22px] mb-2 px-1" style={{ color: '#d4a574' }}>{group.key}</div>
-          <div className="glass rounded-3xl overflow-hidden divide-y divide-white/5">
-            {group.games.map(game => {
-              const tier = game.rating ? TIER(game.rating.total) : null;
-              const isTop50 = game.topListRank != null;
-              const plat = primaryPlatform(game);
-              return (
-                <button
-                  key={game.id}
-                  onClick={() => onSelect(game)}
-                  className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-white/5 active:bg-white/10 transition-colors"
-                >
-                  <div className="w-4 shrink-0 flex justify-center">
-                    {isTop50 && <Icon name="star" filled className="w-3.5 h-3.5" style={{ color: tier?.color }} />}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="serif text-[17px] leading-tight truncate">{game.title}</div>
-                  </div>
-                  {plat && (
-                    <div className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium shrink-0">
-                      {plat}
+    <div className="screen-enter">
+      <div className="px-4 pb-3 flex gap-2 overflow-x-auto no-scrollbar">
+        <SortFilterSelect
+          label="Sort"
+          value={sort}
+          onChange={setSort}
+          options={[
+            ['yearDesc', 'Year (recent → oldest)'],
+            ['yearAsc',  'Year (oldest → recent)'],
+            ['console',  'Console (newest → oldest)'],
+            ['rating',   'Rating (Masterpiece → Good)'],
+          ]}
+        />
+        <SortFilterSelect
+          label="Filter"
+          value={filter}
+          onChange={setFilter}
+          options={[['all', 'All']]}
+          groups={[
+            { label: 'Rating', options: [
+              ['top50',        'Top 50'],
+              ['masterpiece',  'Masterpiece'],
+              ['outsideTop50', 'Outside Top 50'],
+            ]},
+            { label: 'Console', options: consoles.map(c => [`console:${c}`, c]) },
+            { label: 'Year',    options: years.map(y => [`year:${y}`, String(y)]) },
+          ]}
+        />
+      </div>
+
+      <div className="px-4 space-y-6 pb-32">
+        {groups.map(group => (
+          <div key={group.key}>
+            <div className="serif text-[22px] mb-2 px-1" style={{ color: groupColor(group.key) }}>{group.key}</div>
+            <div className="glass rounded-3xl overflow-hidden divide-y divide-white/5">
+              {group.games.map(game => {
+                const tier = game.rating ? TIER(game.rating.total) : null;
+                const isTop50 = game.topListRank != null;
+                const plat = primaryPlatform(game);
+                return (
+                  <button
+                    key={game.id}
+                    onClick={() => onSelect(game)}
+                    className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-white/5 active:bg-white/10 transition-colors"
+                  >
+                    <div className="w-4 shrink-0 flex justify-center">
+                      {isTop50 && <Icon name="star" filled className="w-3.5 h-3.5" style={{ color: tier?.color }} />}
                     </div>
-                  )}
-                </button>
-              );
-            })}
+                    <div className="min-w-0 flex-1">
+                      <div className="serif text-[17px] leading-tight truncate">{game.title}</div>
+                    </div>
+                    {plat && (
+                      <div className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium shrink-0">
+                        {plat}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+
+        {groups.length === 0 && (
+          <EmptyState title="Nothing matches" subtitle="Try a different filter." />
+        )}
+      </div>
     </div>
   );
 };
@@ -3262,10 +3454,20 @@ const App = () => {
 
     (async () => {
       let done = 0;
+      // Year hint can come from g.year OR from the parsed expectedDate
+      const targetYearOf = (g) => {
+        if (g.year) return g.year;
+        if (g.expectedDate) {
+          const sk = parseExpected(g.expectedDate).sortKey;
+          if (sk >= 10000) return Math.floor(sk / 10000);
+        }
+        return null;
+      };
+
       for (const g of toEnrich) {
         if (cancelled) break;
         try {
-          const match = await searchRawg(g.title, g.year);
+          const match = await searchRawg(g.title, targetYearOf(g));
           const patch = match ? {
             coverImage: match.background_image || null,
             rawgId: match.id,
