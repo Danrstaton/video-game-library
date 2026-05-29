@@ -9,6 +9,12 @@
 <meta name="apple-mobile-web-app-title" content="Library">
 <title>Library — Video Game Journal</title>
 
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
+<link rel="apple-touch-icon" sizes="167x167" href="icon-167.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -2362,18 +2368,18 @@ const CATEGORIES = [
   { key: 'value',       label: 'Value',      full: 'Value' },
 ];
 
-// Tier colors — distinct medal-style: Gold / Bronze / Steel
+// Tier colors — medal-style: Gold / Silver / Bronze
 const TIER = (score) => {
   if (score >= 100) return { label: 'Masterpiece', color: '#e2b878' }; // rich gold
-  if (score >= 90)  return { label: 'Amazing',     color: '#b87349' }; // warm bronze/copper
-  if (score >= 80)  return { label: 'Great',       color: '#7a8a99' }; // cool steel blue-grey
+  if (score >= 90)  return { label: 'Amazing',     color: '#a8b4c0' }; // cool silver
+  if (score >= 80)  return { label: 'Great',       color: '#b87349' }; // warm bronze
   if (score >= 70)  return { label: 'Good',        color: '#5d6770' };
   return { label: 'Mixed', color: '#4a5260' };
 };
 const TIER_COLOR_FOR_LABEL = {
   Masterpiece: '#e2b878',
-  Amazing:     '#b87349',
-  Great:       '#7a8a99',
+  Amazing:     '#a8b4c0',
+  Great:       '#b87349',
 };
 
 const STATE_META = {
@@ -2632,25 +2638,18 @@ const GameCard = ({ game, onClick }) => {
       </div>
     );
   } else if (game.state === 'recommended') {
-    leftBadge = (
-      <div className="glass-light rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wider uppercase text-zinc-300">
-        Recommended
-      </div>
-    );
-  }
-
-  // TOP-RIGHT — only Recommended hours
-  let rightBadge = null;
-  if (game.state === 'recommended') {
     const hrs = game.timeToBeat || game.rawgPlaytime;
     if (hrs) {
-      rightBadge = (
+      leftBadge = (
         <div className="glass-light rounded-full px-2 py-0.5 text-[10px] font-medium text-zinc-200">
           ~{hrs} hrs
         </div>
       );
     }
   }
+
+  // TOP-RIGHT — currently unused; reserved for future signals
+  let rightBadge = null;
 
   // Bottom meta line — full date for Upcoming, year+platform for others
   const plat = primaryPlatform(game);
@@ -2809,6 +2808,88 @@ const ListView = ({ groups, formatRight, formatSubtitle, onSelect, accentColor =
 // SECTION CONTENT
 // =============================================================================
 
+// Cover-Flow style horizontal scroller — center card flat-front,
+// neighbors angled inward and stacked behind. Snap-scroll.
+const CoverFlowRow = ({ games, onSelect, cardWidth = 168 }) => {
+  const containerRef = useRef(null);
+  const cardRefs = useRef({});
+
+  const updateTransforms = () => {
+    const container = containerRef.current;
+    if (!container) return;
+    const viewportCenterX = container.scrollLeft + container.clientWidth / 2;
+    Object.entries(cardRefs.current).forEach(([id, el]) => {
+      if (!el) return;
+      const cardCenterX = el.offsetLeft + el.offsetWidth / 2;
+      const offset = (cardCenterX - viewportCenterX) / el.offsetWidth;
+      const abs = Math.min(Math.abs(offset), 3);
+      const rotateY = Math.max(-50, Math.min(50, -offset * 32));
+      const scale = Math.max(0.74, 1 - abs * 0.11);
+      const translateZ = -Math.min(120, abs * 50);
+      const opacity = Math.max(0.45, 1 - abs * 0.22);
+      el.style.transform = `translateZ(${translateZ}px) rotateY(${rotateY}deg) scale(${scale})`;
+      el.style.opacity = opacity;
+      el.style.zIndex = abs < 0.4 ? 30 : abs < 1.2 ? 20 : 10;
+    });
+  };
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    let rafId = null;
+    const onScroll = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        updateTransforms();
+        rafId = null;
+      });
+    };
+    container.addEventListener('scroll', onScroll, { passive: true });
+    // First paint may not have layout yet; defer one frame.
+    requestAnimationFrame(updateTransforms);
+    const ro = new ResizeObserver(() => requestAnimationFrame(updateTransforms));
+    ro.observe(container);
+    return () => { container.removeEventListener('scroll', onScroll); ro.disconnect(); };
+  }, [games]);
+
+  const sidePad = `calc(50% - ${cardWidth / 2}px)`;
+
+  return (
+    <div
+      ref={containerRef}
+      className="overflow-x-auto no-scrollbar"
+      style={{
+        scrollSnapType: 'x mandatory',
+        scrollBehavior: 'smooth',
+        paddingLeft: sidePad,
+        paddingRight: sidePad,
+        paddingTop: '20px',
+        paddingBottom: '20px',
+        perspective: '1200px',
+      }}
+    >
+      <div className="flex gap-3 items-center" style={{ transformStyle: 'preserve-3d' }}>
+        {games.map(g => (
+          <div
+            key={g.id}
+            ref={el => { cardRefs.current[g.id] = el; }}
+            className="shrink-0"
+            style={{
+              width: `${cardWidth}px`,
+              scrollSnapAlign: 'center',
+              willChange: 'transform, opacity',
+              transition: 'transform 120ms ease-out, opacity 120ms ease-out',
+              transformOrigin: 'center center',
+            }}
+          >
+            <GameCard game={g} onClick={() => onSelect(g)} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const Top50View = ({ games, onSelect }) => {
   const groups = useMemo(() => {
     const list = games.filter(g => g.topListRank != null).sort((a, b) => a.topListRank - b.topListRank);
@@ -2823,15 +2904,14 @@ const Top50View = ({ games, onSelect }) => {
   }, [games]);
 
   return (
-    <div className="px-4 space-y-6 pb-32">
+    <div className="space-y-4 pb-32">
       {groups.map(group => (
         <div key={group.key}>
-          <div className="serif text-[22px] mb-3 px-1" style={{ color: TIER_COLOR_FOR_LABEL[group.key] }}>
+          <div className="serif text-[22px] mb-1 px-5" style={{ color: TIER_COLOR_FOR_LABEL[group.key] }}>
             {group.key}
+            <span className="text-zinc-500 text-[14px] ml-2 tabular-nums">{group.games.length}</span>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            {group.games.map(g => <GameCard key={g.id} game={g} onClick={() => onSelect(g)} />)}
-          </div>
+          <CoverFlowRow games={group.games} onSelect={onSelect} />
         </div>
       ))}
     </div>
@@ -3112,6 +3192,53 @@ const EmptyState = ({ title, subtitle }) => (
 );
 
 // =============================================================================
+// RECENT-RELEASE BANNER
+// Surfaces tracked games whose release date has passed in the last 14 days.
+// (When a Cloudflare Worker is added later, this same data feeds real push.)
+// =============================================================================
+const RecentReleaseBanner = ({ games, onSelect }) => {
+  const recent = useMemo(() => {
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - 14 * 86400000);
+    return games.filter(g => {
+      if (g.state !== 'upcoming') return false;
+      const ed = g.expectedDate;
+      if (!ed) return false;
+      if (ed === 'Available') return true;
+      const md = ed.match(/^(\d{1,2})\/(\d{1,2})$/);
+      if (md) {
+        const date = new Date(now.getFullYear(), parseInt(md[1], 10) - 1, parseInt(md[2], 10));
+        return date <= now && date >= cutoff;
+      }
+      return false;
+    });
+  }, [games]);
+
+  if (recent.length === 0) return null;
+
+  return (
+    <div className="mx-4 mt-3 glass rounded-2xl p-3.5 border border-amber-500/20">
+      <div className="text-[10px] uppercase tracking-[0.2em] font-medium mb-2 flex items-center gap-1.5" style={{ color: '#d4a574' }}>
+        <span className="inline-block w-1.5 h-1.5 rounded-full bg-gold animate-pulse" />
+        Released recently
+      </div>
+      <div className="space-y-1.5">
+        {recent.map(g => (
+          <button
+            key={g.id}
+            onClick={() => onSelect(g)}
+            className="w-full flex items-center gap-2 text-sm py-0.5 text-left hover:opacity-80"
+          >
+            <span className="serif text-zinc-100 flex-1 truncate">{g.title}</span>
+            <span className="text-zinc-500 text-xs tabular-nums shrink-0">{parseExpected(g.expectedDate).label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// =============================================================================
 // LIBRARY SCREEN
 // =============================================================================
 const LibraryScreen = ({ games, onSelect, section, setSection, enrichStatus, onAdd, onExport }) => {
@@ -3154,6 +3281,8 @@ const LibraryScreen = ({ games, onSelect, section, setSection, enrichStatus, onA
             </button>
           </div>
         </div>
+
+        <RecentReleaseBanner games={games} onSelect={onSelect} />
 
         <div className="px-4 pt-4">
           <div className="glass-light rounded-2xl flex items-center gap-2 px-3.5 py-2.5">
@@ -4055,6 +4184,13 @@ const App = () => {
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<App />);
+
+// Register service worker (foundation for future push notifications)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW registration failed:', err));
+  });
+}
 </script>
 </body>
 </html>
