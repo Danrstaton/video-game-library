@@ -68,9 +68,9 @@ const NSFW_KEYWORDS = /\b(porn|nude|sex|erotic|onlyfans|hentai|nsfw|escort|prost
 const VICE_KEEP = /\/(games?|gaming|waypoint)(\/|$|-)/i;
 
 // Drop articles whose title makes them clearly NOT about video games.
-// Conservative — we'd rather let a few false negatives through than drop
-// legit gaming news. Only fires on strong "this is a movie/TV/comic" signals.
-const NON_GAMING_TITLE_RE = /\b(movie|film(?!s?\s+(festival|score))|tv\s+show|tv\s+series|television series|series\s+(finale|premiere|renewed|cancell)|season\s+(finale|premiere|\d)|miniseries|streaming\s+series|netflix\s+(series|show|original)|hbo\s+(max\s+)?(series|show)|disney\+\s+(series|show)|apple\s+tv\+\s+(series|show)|prime\s+video\s+(series|show)|comic\s+book(?!\s+game)|graphic\s+novel|manga(?!\s+(game|adaptation))|anime\s+(series|season|episode)|album\s+release|world\s+tour|music\s+video|talk\s+show|late\s+night|wrestlemania|super\s+bowl|olympics)\b/i;
+// Two halves: general signals (movie, TV, comic, etc.) and specific
+// franchise names that are *only* TV/film (no game equivalent we care about).
+const NON_GAMING_TITLE_RE = /\b(movie|film(?!s?\s+(festival|score))|tv\s+show|tv\s+series|television series|series\s+(finale|premiere|renewed|cancell)|season\s+(finale|premiere|\d)|miniseries|streaming\s+series|netflix\s+(series|show|original)|hbo\s+(max\s+)?(series|show)|disney\+\s+(series|show)|apple\s+tv\+\s+(series|show)|prime\s+video\s+(series|show)|comic\s+book(?!\s+game)|graphic\s+novel|manga(?!\s+(game|adaptation))|anime\s+(series|season|episode)|album\s+release|world\s+tour|music\s+video|talk\s+show|late\s+night|wrestlemania|super\s+bowl|olympics|game\s+of\s+thrones|house\s+of\s+the\s+dragon|stranger\s+things|squid\s+game(?!\s+(unleashed|mobile))|wednesday(?:\s+(season|episode|series|netflix))?|emilia\s+clarke|daenerys|jon\s+snow|the\s+witcher\s+(season|episode|netflix\s+series)|breaking\s+bad|better\s+call\s+saul|wandavision|loki\s+season|euphoria)\b/i;
 
 // Articles whose title/excerpt strongly signals gaming. Used both as an
 // override for the non-gaming filter (e.g. "Movie tie-in game launched")
