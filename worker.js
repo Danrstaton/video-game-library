@@ -320,13 +320,18 @@ async function fetchAllEvents(headlines) {
         const html = await fetchText(ev.url);
         const upcoming = extractWikipediaUpcoming(html);
         if (!upcoming) return null;
+        const parsedDate = parseEventDate(upcoming.date);
+        const dateSlug = parsedDate
+          ? parsedDate.toISOString().slice(0, 10)
+          : upcoming.date.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
         return {
-          id: `${ev.type}-${upcoming.date}`,
+          id: `${ev.type}-${dateSlug}`,
           type: ev.type,
           title: ev.title,
           date: upcoming.date,
           time: upcoming.time,
           accent: ev.accent,
+          _source: 'wikipedia',
         };
       } catch {
         return null;
@@ -434,17 +439,10 @@ function extractDateFromText(text, contextDate) {
 }
 
 function extractTimeFromText(text) {
-  const m = text.match(
-    /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)(?:\s+(Pacific|Eastern|Central|Mountain|PT|ET|CT|MT|UTC|GMT))?\b/i
-  );
-  return m ? m[0] : null;
+  return extractTimeFromCell(text) || null;
 }
 
 function extractWikipediaUpcoming(html) {
-  // Walk every table row on the page. For each row, parse cells looking for
-  // a future-dated cell + a time-of-day cell. Pick the soonest upcoming
-  // event from anywhere in the page (handles "Upcoming" sections, main
-  // tables with a future row, etc.).
   const now = Date.now();
   const candidates = [];
   for (const rowMatch of html.matchAll(/<tr[^>]*>[\s\S]*?<\/tr>/g)) {
@@ -464,8 +462,9 @@ function extractWikipediaUpcoming(html) {
           dateTs = parsed.getTime();
         }
       }
-      if (!timeCell && /\d{1,2}[:.]\d{2}\s*(am|pm|a\.m\.|p\.m\.|et|pt|ct|mt|utc|gmt)/i.test(cell)) {
-        timeCell = cell;
+      if (!timeCell) {
+        const t = extractTimeFromCell(cell);
+        if (t) timeCell = t;
       }
     }
     if (dateCell && dateTs > now - 86_400_000) {
@@ -475,6 +474,18 @@ function extractWikipediaUpcoming(html) {
   if (candidates.length === 0) return null;
   candidates.sort((a, b) => a.ts - b.ts);
   return { date: candidates[0].date, time: candidates[0].time };
+}
+
+// Permissive time extractor — handles "5:00 PM EDT", "17:00 UTC",
+// "5 p.m.", "2 PM Pacific". Returns the full matched substring.
+function extractTimeFromCell(cell) {
+  // 1) HH:MM with optional am/pm and timezone — e.g. "5:00 PM EDT", "17:00 UTC"
+  let m = cell.match(/\b(\d{1,2}):(\d{2})\s*(?:(am|pm|a\.m\.|p\.m\.)\s*)?(?:\(?\s*(UTC|GMT|EST|EDT|PST|PDT|CST|CDT|MST|MDT|ET|PT|CT|MT|JST|CET|Pacific|Eastern|Central|Mountain)\s*\)?)?/i);
+  if (m) return m[0].trim();
+  // 2) Hour with am/pm (no minutes) — e.g. "2 PM Pacific"
+  m = cell.match(/\b(\d{1,2})\s*(am|pm|a\.m\.|p\.m\.)\s*(?:\(?\s*(UTC|GMT|EST|EDT|PST|PDT|CST|CDT|MST|MDT|ET|PT|CT|MT|JST|CET|Pacific|Eastern|Central|Mountain)\s*\)?)?/i);
+  if (m) return m[0].trim();
+  return '';
 }
 
 function parseEventDate(s) {
