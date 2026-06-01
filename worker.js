@@ -21,15 +21,19 @@ const PODCAST_EPISODES = 8;
 // SOURCES
 // -----------------------------------------------------------------------------
 
+// `dedicated: true` means the feed is gaming-only — we trust it.
+// `dedicated: false` means we require a gaming keyword in the article before
+// accepting it (Engadget covers all consumer tech, Polygon covers movies/TV,
+// etc.)
 const RSS_SOURCES = [
-  { source: 'Nintendo Life',    url: 'https://www.nintendolife.com/feeds/news' },
-  { source: 'PlayStation Blog', url: 'https://blog.playstation.com/feed/' },
-  { source: 'Polygon',          url: 'https://www.polygon.com/rss/index.xml' },
-  { source: 'IGN',              url: 'https://feeds.feedburner.com/ign/games-all' },
-  { source: 'Engadget',         url: 'https://www.engadget.com/rss.xml' },
-  { source: 'Push Square',      url: 'https://www.pushsquare.com/feeds/news' },
-  { source: 'GamesRadar+',      url: 'https://www.gamesradar.com/all-articles/rss/' },
-  { source: 'Vice',             url: 'https://www.vice.com/en/rss' },
+  { source: 'Nintendo Life',    url: 'https://www.nintendolife.com/feeds/news',          dedicated: true  },
+  { source: 'PlayStation Blog', url: 'https://blog.playstation.com/feed/',               dedicated: true  },
+  { source: 'Polygon',          url: 'https://www.polygon.com/rss/index.xml',            dedicated: false },
+  { source: 'IGN',              url: 'https://feeds.feedburner.com/ign/games-all',       dedicated: true  },
+  { source: 'Engadget',         url: 'https://www.engadget.com/rss.xml',                 dedicated: false },
+  { source: 'Push Square',      url: 'https://www.pushsquare.com/feeds/news',            dedicated: true  },
+  { source: 'GamesRadar+',      url: 'https://www.gamesradar.com/all-articles/rss/',     dedicated: false },
+  { source: 'Vice',             url: 'https://www.vice.com/en/rss',                      dedicated: false },
 ];
 
 // Podcasts — referenced by handle, the Worker resolves the channel ID itself
@@ -68,9 +72,12 @@ const VICE_KEEP = /\/(games?|gaming|waypoint)(\/|$|-)/i;
 // legit gaming news. Only fires on strong "this is a movie/TV/comic" signals.
 const NON_GAMING_TITLE_RE = /\b(movie|film(?!s?\s+(festival|score))|tv\s+show|tv\s+series|television series|series\s+(finale|premiere|renewed|cancell)|season\s+(finale|premiere|\d)|miniseries|streaming\s+series|netflix\s+(series|show|original)|hbo\s+(max\s+)?(series|show)|disney\+\s+(series|show)|apple\s+tv\+\s+(series|show)|prime\s+video\s+(series|show)|comic\s+book(?!\s+game)|graphic\s+novel|manga(?!\s+(game|adaptation))|anime\s+(series|season|episode)|album\s+release|world\s+tour|music\s+video|talk\s+show|late\s+night|wrestlemania|super\s+bowl|olympics)\b/i;
 
-// Articles whose title shouts gaming — these override the non-gaming filter
-// (rare cases where both match, e.g. "Movie tie-in game launched").
-const STRONG_GAMING_TITLE_RE = /\b(video\s+game|gameplay|playstation|ps[1-9]|xbox|nintendo|switch\s*2?|steam\s+deck|game\s+pass|dlc|expansion\s+pack|controller|console\s+(launch|exclusive)|esports?|speedrun)\b/i;
+// Articles whose title/excerpt strongly signals gaming. Used both as an
+// override for the non-gaming filter (e.g. "Movie tie-in game launched")
+// AND as the gating signal for mixed-content sources (Engadget, Polygon,
+// Vice, GamesRadar+) — those sources need a gaming keyword for an article
+// to be kept at all.
+const GAMING_SIGNALS_RE = /\b(?:video\s*games?|gameplay|gamer|gaming|playstation|ps[1-9]\b|xbox|nintendo|switch\s*2?\b|steam\s*deck|steam\b|game\s*pass|dlc|expansion\s+(?:pack|game)|console\b|esports?|speedrun|emulat|controller|gamepad|joy[- ]?con|dualsense|game\s+(?:launch|reveal|release|review|trailer|preview|update|patch|delay|announced|drops?|hits?|coming|of\s+the\s+year)|launch\s+title|exclusive\s+(?:game|title)|RPG\b|FPS\b|MMO\b|battle\s+royale|metroidvania|roguelike|soulslike|Pokémon|Pokemon|Mario|Zelda|Sonic|Final\s+Fantasy|Grand\s+Theft\s+Auto|GTA\s*VI?|Call\s+of\s+Duty|Hogwarts\s+Legacy|Spider-?Man\s+2?|Last\s+of\s+Us|God\s+of\s+War|Ghost\s+of\s+(?:Tsushima|Yotei|Yōtei)|Metroid|Splatoon|Halo|Forza|Hollow\s+Knight|Silksong|Marvel'?s\s+\w+|Star\s+Wars\s+(?:Jedi|Outlaws|Galactic)|Tomb\s+Raider|Clair\s+Obscur|Death\s+Stranding|Mixtape|Pokopia|Activision|Ubisoft|Bethesda|Capcom|Konami|Sega|Square\s+Enix|Bandai\s+Namco|FromSoftware|Insomniac|Naughty\s+Dog|Game\s+Freak|Bungie|Riot\s+Games|Valve\b|Epic\s+Games|Annapurna|Rockstar|Sony\s+Interactive)\b/i;
 
 const WIKIPEDIA_EVENT_SOURCES = [
   {
@@ -187,12 +194,21 @@ async function fetchAllHeadlines() {
         );
 
         // Drop articles that are clearly NOT about video games (movies, TV
-        // shows, comics, anime, music). Strong gaming signals override.
+        // shows, comics, anime, music). Gaming signals override.
         items = items.filter((it) => {
-          const title = it.title || '';
-          if (STRONG_GAMING_TITLE_RE.test(title)) return true;
-          return !NON_GAMING_TITLE_RE.test(title);
+          const haystack = `${it.title || ''} ${it.excerpt || ''}`;
+          if (GAMING_SIGNALS_RE.test(haystack)) return true;
+          return !NON_GAMING_TITLE_RE.test(it.title || '');
         });
+
+        // Mixed-content sources: require an explicit gaming signal somewhere
+        // in title/excerpt/URL. Drops Engadget's Apple/Google/Tesla coverage,
+        // Polygon's movie/TV pieces, GamesRadar's entertainment posts, etc.
+        if (!src.dedicated) {
+          items = items.filter((it) =>
+            GAMING_SIGNALS_RE.test(`${it.title || ''} ${it.excerpt || ''} ${it.url || ''}`)
+          );
+        }
 
         items = items.slice(0, HEADLINES_PER_SOURCE);
 
