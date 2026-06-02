@@ -5312,6 +5312,437 @@ const ReaderSheet = ({ open, item, onClose, onMarkRead }) => {
 // =============================================================================
 // NEWS SCREEN
 // =============================================================================
+// =============================================================================
+// STATS SCREEN — pure local computation across the user's library.
+// All charts are hand-rolled SVG (no external lib) to keep the bundle clean.
+// =============================================================================
+const StatsScreen = ({ games, tab, onTabChange }) => {
+  const stats = useMemo(() => computeStats(games), [games]);
+
+  return (
+    <div className="screen-enter pt-safe pb-32">
+      <div className="px-4 pt-5 pb-1">
+        <TitleNav active={tab} onChange={onTabChange} />
+      </div>
+
+      {/* Hero numbers */}
+      <div className="px-4 mt-5 grid grid-cols-2 gap-3">
+        <StatTile label="Played" value={stats.totalPlayed} sub={stats.totalRated > 0 ? `${stats.totalRated} rated` : null} />
+        <StatTile label="Avg score" value={stats.avgScore != null ? stats.avgScore.toFixed(1) : '—'} sub="of rated games" />
+        <StatTile label="Top 50 avg" value={stats.top50Avg != null ? stats.top50Avg.toFixed(1) : '—'} sub={`${stats.masterpieces} masterpieces`} />
+        <StatTile label="Total hours" value={stats.totalHours > 0 ? stats.totalHours.toLocaleString() : '—'} sub={stats.totalHours > 0 ? 'from RAWG' : 'no data yet'} />
+      </div>
+
+      {/* Score distribution */}
+      <SectionCard title="Score distribution" subtitle={`${stats.totalRated} rated games · histogram by tier`}>
+        <ScoreHistogram buckets={stats.scoreBuckets} />
+      </SectionCard>
+
+      {/* Taste profile radar */}
+      <SectionCard title="Your taste profile" subtitle="Average rating across all 10 rubric categories">
+        <TasteRadar averages={stats.categoryAverages} />
+      </SectionCard>
+
+      {/* By platform */}
+      <SectionCard title="By console" subtitle="Average score & game count for each platform">
+        <PlatformBars rows={stats.byPlatform} />
+      </SectionCard>
+
+      {/* By release year */}
+      <SectionCard title="By release year" subtitle="How many played games came out each year">
+        <YearLine points={stats.byYear} />
+      </SectionCard>
+
+      {/* Completion */}
+      <SectionCard title="Completion" subtitle={`${stats.totalRated} rated games`}>
+        <CompletionBars completion={stats.completion} totalRated={stats.totalRated} />
+      </SectionCard>
+
+      {/* Score vs release year scatter */}
+      <SectionCard title="Score vs. release year" subtitle="Each dot is a Top 50 game">
+        <ScoreYearScatter dots={stats.scatter} />
+      </SectionCard>
+
+      {stats.totalPlayed === 0 && (
+        <div className="mx-4 mt-6 glass rounded-2xl p-6 text-center text-zinc-400 text-sm">
+          Rate some games to start filling your Stats page.
+        </div>
+      )}
+    </div>
+  );
+};
+
+// -----------------------------------------------------------------------------
+// Stats computation
+// -----------------------------------------------------------------------------
+const computeStats = (games) => {
+  const played = games.filter(g => g.state === 'played');
+  const rated = played.filter(g => g.rating && g.rating.total != null);
+  const top50 = games.filter(g => g.topListRank != null);
+
+  // Score buckets — 10-point bins (with 100 as its own bin)
+  const buckets = Array.from({ length: 11 }, (_, i) => ({
+    label: i === 10 ? '100' : `${i * 10}-${i * 10 + 9}`,
+    count: 0,
+    tier: i === 10 ? 'Masterpiece' : i >= 9 ? 'Amazing' : i >= 8 ? 'Great' : 'Other',
+  }));
+  rated.forEach(g => {
+    const score = g.rating.total;
+    const idx = score >= 100 ? 10 : Math.min(9, Math.floor(score / 10));
+    buckets[idx].count++;
+  });
+
+  // Category averages — using all rated games
+  const categoryAverages = {};
+  CATEGORIES.forEach(c => {
+    if (rated.length === 0) { categoryAverages[c.key] = 0; return; }
+    const sum = rated.reduce((acc, g) => acc + (g.rating[c.key] || 0), 0);
+    categoryAverages[c.key] = sum / rated.length;
+  });
+
+  // By platform — for rated games, use either user platform or RAWG-best
+  const platformMap = {};
+  rated.forEach(g => {
+    const p = primaryPlatform(g);
+    if (!p) return;
+    if (!platformMap[p]) platformMap[p] = { sum: 0, count: 0 };
+    platformMap[p].sum += g.rating.total;
+    platformMap[p].count++;
+  });
+  const byPlatform = Object.entries(platformMap)
+    .map(([platform, { sum, count }]) => ({ platform, avg: sum / count, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  // By year — count of rated games by release year
+  const yearMap = {};
+  rated.forEach(g => {
+    const year = primaryYear(g);
+    if (!year) return;
+    yearMap[year] = (yearMap[year] || 0) + 1;
+  });
+  const byYear = Object.entries(yearMap)
+    .map(([year, count]) => ({ year: parseInt(year, 10), count }))
+    .sort((a, b) => a.year - b.year);
+
+  // Completion stats
+  const completion = { story: 0, platinum: 0, replayed: 0 };
+  rated.forEach(g => {
+    if (g.completion?.story)    completion.story++;
+    if (g.completion?.platinum) completion.platinum++;
+    if (g.completion?.replayed) completion.replayed++;
+  });
+
+  // Scatter — Top 50 games by year + score
+  const scatter = top50
+    .filter(g => g.rating?.total != null && primaryYear(g) != null)
+    .map(g => ({
+      year: primaryYear(g),
+      score: g.rating.total,
+      title: g.title,
+      tierColor: TIER(g.rating.total).color,
+    }));
+
+  // Totals
+  const totalPlayed = played.length;
+  const totalRated = rated.length;
+  const avgScore = rated.length > 0
+    ? rated.reduce((acc, g) => acc + g.rating.total, 0) / rated.length
+    : null;
+  const top50Avg = top50.length > 0
+    ? top50.reduce((acc, g) => acc + (g.rating?.total || 0), 0) / top50.length
+    : null;
+  const masterpieces = rated.filter(g => g.rating.total >= 100).length;
+  const totalHours = games
+    .filter(g => g.rawgPlaytime && (g.state === 'played' || g.state === 'playing'))
+    .reduce((acc, g) => acc + (g.rawgPlaytime || 0), 0);
+
+  return {
+    totalPlayed, totalRated, avgScore, top50Avg, masterpieces, totalHours,
+    scoreBuckets: buckets, categoryAverages, byPlatform, byYear, completion, scatter,
+  };
+};
+
+// -----------------------------------------------------------------------------
+// Small UI bits
+// -----------------------------------------------------------------------------
+const StatTile = ({ label, value, sub }) => (
+  <div className="glass rounded-2xl p-4">
+    <div className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-medium">{label}</div>
+    <div className="serif text-[36px] leading-none text-white mt-1 tabular-nums">{value}</div>
+    {sub && <div className="text-[11px] text-zinc-500 mt-1.5">{sub}</div>}
+  </div>
+);
+
+const SectionCard = ({ title, subtitle, children }) => (
+  <div className="mx-4 mt-5">
+    <div className="px-1 mb-2">
+      <div className="serif text-[20px] text-white">{title}</div>
+      {subtitle && <div className="text-[11px] text-zinc-500 mt-0.5">{subtitle}</div>}
+    </div>
+    <div className="glass rounded-2xl p-4">
+      {children}
+    </div>
+  </div>
+);
+
+// -----------------------------------------------------------------------------
+// Score histogram — vertical bars colored by tier
+// -----------------------------------------------------------------------------
+const ScoreHistogram = ({ buckets }) => {
+  const maxCount = Math.max(1, ...buckets.map(b => b.count));
+  const TIER_COLOR = {
+    Masterpiece: '#e2b878',
+    Amazing:     '#a8b4c0',
+    Great:       '#b87349',
+    Other:       '#3f3f46',
+  };
+  return (
+    <div>
+      <div className="h-40 flex items-end gap-1">
+        {buckets.map(b => {
+          const h = (b.count / maxCount) * 100;
+          return (
+            <div key={b.label} className="flex-1 flex flex-col items-center justify-end gap-1.5">
+              <div className="text-[10px] text-zinc-400 tabular-nums" style={{ visibility: b.count > 0 ? 'visible' : 'hidden' }}>
+                {b.count}
+              </div>
+              <div
+                className="w-full rounded-t-md"
+                style={{
+                  height: `${Math.max(h, b.count > 0 ? 4 : 0)}%`,
+                  background: TIER_COLOR[b.tier] || TIER_COLOR.Other,
+                  minHeight: b.count > 0 ? 4 : 0,
+                }}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex gap-1 mt-2">
+        {buckets.map(b => (
+          <div key={b.label} className="flex-1 text-[9px] uppercase tracking-wider text-zinc-500 text-center font-medium tabular-nums">
+            {b.label.replace('-', '–')}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// -----------------------------------------------------------------------------
+// Taste radar — same shape as SpiderChart but averages instead of one game
+// -----------------------------------------------------------------------------
+const TasteRadar = ({ averages }) => {
+  const size = 320, padX = 64, padY = 18;
+  const cx = size / 2, cy = size / 2;
+  const radius = size * 0.32;
+  const labelR = radius + size * 0.085;
+  const N = CATEGORIES.length;
+
+  const point = (i, value) => {
+    const angle = (Math.PI * 2 * i) / N - Math.PI / 2;
+    const r = (value / 10) * radius;
+    return [cx + Math.cos(angle) * r, cy + Math.sin(angle) * r];
+  };
+
+  const pts = CATEGORIES.map((c, i) => point(i, averages[c.key] || 0));
+  const rings = [2, 4, 6, 8, 10];
+  const color = '#e2b878';
+
+  return (
+    <svg viewBox={`${-padX} ${-padY} ${size + padX * 2} ${size + padY * 2}`} className="w-full h-auto">
+      {rings.map(v => {
+        const ringPts = Array.from({ length: N }, (_, i) => point(i, v));
+        return (
+          <polygon key={v} points={ringPts.map(p => p.join(',')).join(' ')} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
+        );
+      })}
+      {CATEGORIES.map((c, i) => {
+        const [x, y] = point(i, 10);
+        return <line key={c.key} x1={cx} y1={cy} x2={x} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth="1" />;
+      })}
+      <polygon points={pts.map(p => p.join(',')).join(' ')} fill={color} fillOpacity="0.18" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+      {pts.map(([x, y], i) => <circle key={i} cx={x} cy={y} r="2.5" fill={color} />)}
+      {CATEGORIES.map((c, i) => {
+        const angle = (Math.PI * 2 * i) / N - Math.PI / 2;
+        const lx = cx + Math.cos(angle) * labelR;
+        const ly = cy + Math.sin(angle) * labelR;
+        const anchor = Math.abs(Math.cos(angle)) < 0.3 ? 'middle' : (Math.cos(angle) > 0 ? 'start' : 'end');
+        const value = (averages[c.key] || 0).toFixed(1);
+        return (
+          <g key={c.key}>
+            <text x={lx} y={ly - 5} textAnchor={anchor} fontSize="10" fontFamily="Inter" fontWeight="500" letterSpacing="0.5" fill="rgba(255,255,255,0.5)" style={{ textTransform: 'uppercase' }}>
+              {c.label}
+            </text>
+            <text x={lx} y={ly + 7} textAnchor={anchor} fontSize="11" fontFamily="Inter" fontWeight="600" fill={color}>
+              {value}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+};
+
+// -----------------------------------------------------------------------------
+// Platform horizontal bars
+// -----------------------------------------------------------------------------
+const PlatformBars = ({ rows }) => {
+  if (rows.length === 0) {
+    return <div className="text-sm text-zinc-500 text-center py-2">No platform data yet.</div>;
+  }
+  const maxCount = Math.max(...rows.map(r => r.count));
+  return (
+    <div className="space-y-2.5">
+      {rows.map(({ platform, avg, count }) => {
+        const tier = TIER(avg);
+        return (
+          <div key={platform} className="flex items-center gap-3">
+            <div className="text-[12px] uppercase tracking-wider text-zinc-300 w-20 shrink-0 font-medium">{platform}</div>
+            <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full"
+                style={{ width: `${(count / maxCount) * 100}%`, background: tier.color }}
+              />
+            </div>
+            <div className="text-right shrink-0">
+              <div className="text-[13px] font-semibold tabular-nums" style={{ color: tier.color }}>{avg.toFixed(1)}</div>
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500 tabular-nums">{count} {count === 1 ? 'game' : 'games'}</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+// -----------------------------------------------------------------------------
+// By release year — line chart with dots
+// -----------------------------------------------------------------------------
+const YearLine = ({ points }) => {
+  if (points.length === 0) {
+    return <div className="text-sm text-zinc-500 text-center py-4">No year data yet.</div>;
+  }
+  const w = 340, h = 160, padL = 24, padR = 8, padT = 12, padB = 22;
+  const minYear = points[0].year;
+  const maxYear = points[points.length - 1].year;
+  const maxCount = Math.max(...points.map(p => p.count));
+  const yearRange = Math.max(1, maxYear - minYear);
+  const xOf = (year) => padL + ((year - minYear) / yearRange) * (w - padL - padR);
+  const yOf = (count) => h - padB - (count / maxCount) * (h - padT - padB);
+  const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(p.year).toFixed(1)} ${yOf(p.count).toFixed(1)}`).join(' ');
+  const ticks = [minYear, minYear + Math.floor(yearRange / 2), maxYear].filter((v, i, a) => a.indexOf(v) === i);
+
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-auto">
+      {/* Grid lines */}
+      {[0.25, 0.5, 0.75, 1].map(frac => {
+        const y = h - padB - frac * (h - padT - padB);
+        return <line key={frac} x1={padL} x2={w - padR} y1={y} y2={y} stroke="rgba(255,255,255,0.04)" strokeWidth="1" />;
+      })}
+      {/* Path */}
+      <path d={path} fill="none" stroke="#e2b878" strokeWidth="1.5" strokeLinejoin="round" />
+      {/* Dots */}
+      {points.map(p => (
+        <circle key={p.year} cx={xOf(p.year)} cy={yOf(p.count)} r="2.5" fill="#e2b878" />
+      ))}
+      {/* X axis labels */}
+      {ticks.map(year => (
+        <text key={year} x={xOf(year)} y={h - 6} textAnchor="middle" fontSize="9" fill="rgba(255,255,255,0.4)" fontFamily="Inter">
+          {year}
+        </text>
+      ))}
+      {/* Y axis max */}
+      <text x={padL - 4} y={padT + 4} textAnchor="end" fontSize="9" fill="rgba(255,255,255,0.4)" fontFamily="Inter">{maxCount}</text>
+      <text x={padL - 4} y={h - padB + 2} textAnchor="end" fontSize="9" fill="rgba(255,255,255,0.4)" fontFamily="Inter">0</text>
+    </svg>
+  );
+};
+
+// -----------------------------------------------------------------------------
+// Completion bars (Story / Platinum / Replayed)
+// -----------------------------------------------------------------------------
+const CompletionBars = ({ completion, totalRated }) => {
+  if (totalRated === 0) {
+    return <div className="text-sm text-zinc-500 text-center py-2">No rated games yet.</div>;
+  }
+  const rows = [
+    { key: 'story',    label: 'Story finished', icon: 'check' },
+    { key: 'platinum', label: 'Platinum / 100%', icon: 'trophy' },
+    { key: 'replayed', label: 'Replayed',        icon: 'replay' },
+  ];
+  return (
+    <div className="space-y-3">
+      {rows.map(({ key, label, icon }) => {
+        const count = completion[key] || 0;
+        const pct = (count / totalRated) * 100;
+        return (
+          <div key={key}>
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center gap-2">
+                <Icon name={icon} className="w-3.5 h-3.5 text-zinc-400" />
+                <span className="text-[12px] uppercase tracking-wider text-zinc-300 font-medium">{label}</span>
+              </div>
+              <div className="text-[12px] text-zinc-300 tabular-nums">
+                <span style={{ color: '#e2b878' }}>{count}</span>
+                <span className="text-zinc-500"> / {totalRated} · {pct.toFixed(0)}%</span>
+              </div>
+            </div>
+            <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+              <div className="h-full rounded-full" style={{ width: `${pct}%`, background: '#e2b878' }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+// -----------------------------------------------------------------------------
+// Score vs release year scatter
+// -----------------------------------------------------------------------------
+const ScoreYearScatter = ({ dots }) => {
+  if (dots.length === 0) {
+    return <div className="text-sm text-zinc-500 text-center py-4">Top 50 will populate this once you rate some games.</div>;
+  }
+  const w = 340, h = 180, padL = 28, padR = 8, padT = 12, padB = 22;
+  const years = dots.map(d => d.year);
+  const minYear = Math.min(...years);
+  const maxYear = Math.max(...years);
+  const yearRange = Math.max(1, maxYear - minYear);
+  const minScore = 78, maxScore = 100; // leave some breathing room
+  const xOf = (year) => padL + ((year - minYear) / yearRange) * (w - padL - padR);
+  const yOf = (score) => h - padB - ((score - minScore) / (maxScore - minScore)) * (h - padT - padB);
+  const yearTicks = yearRange < 10
+    ? Array.from({ length: yearRange + 1 }, (_, i) => minYear + i)
+    : [minYear, Math.round(minYear + yearRange / 2), maxYear];
+
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-auto">
+      {/* Y grid: 80, 90, 100 */}
+      {[80, 90, 100].map(score => (
+        <g key={score}>
+          <line x1={padL} x2={w - padR} y1={yOf(score)} y2={yOf(score)} stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
+          <text x={padL - 4} y={yOf(score) + 3} textAnchor="end" fontSize="9" fill="rgba(255,255,255,0.4)" fontFamily="Inter">{score}</text>
+        </g>
+      ))}
+      {/* Dots */}
+      {dots.map((d, i) => (
+        <circle key={i} cx={xOf(d.year)} cy={yOf(d.score)} r="3" fill={d.tierColor} fillOpacity="0.8" stroke={d.tierColor} strokeWidth="1">
+          <title>{d.title} · {d.score} · {d.year}</title>
+        </circle>
+      ))}
+      {/* X axis ticks */}
+      {yearTicks.map(year => (
+        <text key={year} x={xOf(year)} y={h - 6} textAnchor="middle" fontSize="9" fill="rgba(255,255,255,0.4)" fontFamily="Inter">
+          {year}
+        </text>
+      ))}
+    </svg>
+  );
+};
+
 const NewsScreen = ({ games, onSelect, tab, onTabChange }) => {
   const [dismissed, setDismissed] = useState(loadDismissed);
   const [filter, setFilter] = useState('all');
@@ -5522,14 +5953,15 @@ const TitleNav = ({ active, onChange }) => {
   const tabs = [
     { id: 'library', label: 'Library' },
     { id: 'news',    label: 'News' },
+    { id: 'stats',   label: 'Stats' },
   ];
   return (
-    <div className="flex items-end gap-5">
+    <div className="flex items-end gap-4">
       {tabs.map(t => {
         const on = active === t.id;
         return (
           <button key={t.id} onClick={() => onChange(t.id)} className="relative pb-1">
-            <h1 className={`serif text-[32px] leading-none transition-colors ${on ? 'text-white' : 'text-zinc-500'}`}>
+            <h1 className={`serif text-[28px] leading-none transition-colors ${on ? 'text-white' : 'text-zinc-500'}`}>
               {t.label}
             </h1>
             {on && (
@@ -5694,6 +6126,13 @@ const App = () => {
             <NewsScreen
               games={games}
               onSelect={g => openDetail(g.id)}
+              tab={tab}
+              onTabChange={setTab}
+            />
+          )}
+          {tab === 'stats' && (
+            <StatsScreen
+              games={games}
               tab={tab}
               onTabChange={setTab}
             />
