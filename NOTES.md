@@ -29,17 +29,25 @@
 - Top 50 floor: games dropping below 80 auto-lose their topListRank
 - News: live feed from Worker (Nintendo Life, PlayStation Blog, Polygon, IGN, Engadget, Push Square, GamesRadar+, Vice) + Wikipedia events + KFGD/KFG from KF YouTube channel
 - In-app article reader (.article-body CSS), Mark as Read, 🎮 image fallback
-- GitHub Gist auto-sync backup (5 sec debounce after any library change)
+- GitHub Gist auto-sync backup (5 sec debounce after any library change) — including "Connect to existing Gist" flow for new-device restore
 - Pull-to-refresh on News, error boundary wrapping the app
 - Library matching (gold star on headlines mentioning tracked games)
 - Filter chips: All / In Library / Nintendo / PlayStation / Reviews / Upcoming / Hardware
 - Editorial design: Lora serif + Inter sans, dark glass aesthetic, source-colored badges
 - Custom 🎮 PWA icon (180/167/192/512), manifest.json, service worker (no real push yet)
+- **Stats page** — third TitleNav tab. Hero tiles (Played/Avg/Top50 avg/Total hours), score distribution histogram, taste profile radar, by-platform bars, by-year line chart, completion bars, score vs release-year scatter. All hand-rolled SVG, computed in computeStats(games).
+- Backup & data sheet — consolidated import/export plus Gist sync under a single sliders icon (settings icon name)
+- Spotify integration removed (was linking wrong shows); YouTube buttons go direct to YouTube via <a target="_blank">
 
 ## Still planned (in priority order)
-1. **Stats page** — new "Stats" section in Library segmented control. Hero numbers (total played, avg score, total hours from RAWG playtime, Top 50 avg, # Masterpieces), score distribution histogram, taste-profile radar across the 10 rubric categories, by-platform bars, by-year line, top publishers/devs, completion %, score vs release-year scatter. All pure local computation.
-2. **"Recommended for you"** — restructure existing Recommended section into two rows: "For you" (RAWG-driven using user's library signal — weight platforms by score sum, publishers/devs by Top 50 presence, Metacritic ≥75) and "Saved for later" (existing manual list). Tap recommended → Save for later / Dismiss.
-3. **In-app YouTube/Spotify player** — embedded YouTube IFrame Player in reader sheet with custom controls (play/pause, ±15 sec skip, scrubber). Media Session API for lockscreen handlers (best effort — iOS PWA + iframe is hit-or-miss). Spotify is removed for now; if revived, embed iframe has native iOS lockscreen integration.
+1. **"Recommended for you"** — restructure existing Recommended section into two rows: "For you" (RAWG-driven using user's library signal — weight platforms by score sum, publishers/devs by Top 50 presence, Metacritic ≥75) and "Saved for later" (existing manual list). Tap recommended → Save for later / Dismiss.
+2. **In-app YouTube player** — embedded YouTube IFrame Player in reader sheet with custom controls (play/pause, ±15 sec skip, scrubber). Media Session API for lockscreen handlers (best effort — iOS PWA + iframe is hit-or-miss). User likes the 15-sec skip when phone is locked.
+
+## Stats page extensions (not yet built)
+- Filter the stats by platform / tier / year ("show me my taste profile for just PS5 games")
+- Top franchises (would need series-tag tracking)
+- Score trend over time (would need rating-change history; not currently stored)
+- "Highest variance category" — which rubric category most distinguishes your top from bottom
 
 ## Open questions / known issues
 - IGN's games-all feed occasionally lets through entertainment crossover (e.g. Game of Thrones references). NON_GAMING_TITLE_RE in worker.js catches the common ones but isn't exhaustive.
