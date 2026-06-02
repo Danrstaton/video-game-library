@@ -45,7 +45,7 @@ const PODCAST_SOURCES = [
     id: 'kinda-funny-games-daily',
     show: 'Kinda Funny Games Daily',
     youtubeHandle: '@KindaFunnyGames',
-    titlePatterns: 'games daily|kfgd|games daily news',
+    titlePatterns: 'kinda funny games daily',
     accent: '#e2b878',
     coverGradient: 'linear-gradient(135deg, #c2410c 0%, #7c2d12 100%)',
     youtubeUrl: 'https://www.youtube.com/@KindaFunnyGames',
@@ -55,7 +55,7 @@ const PODCAST_SOURCES = [
     id: 'kinda-funny-gamescast',
     show: 'Kinda Funny Gamescast',
     youtubeHandle: '@KindaFunnyGames',
-    titlePatterns: 'gamescast',
+    titlePatterns: 'kinda funny gamescast',
     accent: '#a8b4c0',
     coverGradient: 'linear-gradient(135deg, #0c4a6e 0%, #1e293b 100%)',
     youtubeUrl: 'https://www.youtube.com/@KindaFunnyGames',
@@ -279,7 +279,7 @@ function inferCategory(title) {
 // PODCASTS (YouTube channel RSS, filtered by keyword)
 // =============================================================================
 async function fetchAllPodcasts() {
-  // Resolve channel IDs once (multiple shows may share a handle).
+  // 1) Resolve each unique handle to a channel ID
   const handleToChannelId = new Map();
   const uniqueHandles = [...new Set(PODCAST_SOURCES.map((p) => p.youtubeHandle).filter(Boolean))];
   await Promise.all(
@@ -290,62 +290,79 @@ async function fetchAllPodcasts() {
     })
   );
 
-  return Promise.all(
-    PODCAST_SOURCES.map(async (pod) => {
-      const baseShape = {
-        id: pod.id,
-        show: pod.show,
-        accent: pod.accent,
-        coverGradient: pod.coverGradient,
-        youtubeUrl: pod.youtubeUrl,
-        spotifyUrl: pod.spotifyUrl,
-        episodes: [],
-      };
+  // 2) Fetch each unique CHANNEL's RSS exactly once. Multiple shows that
+  //    share a channel reuse the same fetch — avoids YouTube flakiness
+  //    where two parallel requests to the same URL can return different
+  //    statuses (one OK, one 404).
+  const channelData = new Map(); // channelId → { videos?: [...], error?: string }
+  const uniqueChannelIds = [...new Set([...handleToChannelId.values()].filter(Boolean))];
+  await Promise.all(
+    uniqueChannelIds.map(async (cid) => {
       try {
-        const channelId = handleToChannelId.get(pod.youtubeHandle);
-        if (!channelId) throw new Error(`Could not resolve channel ID for ${pod.youtubeHandle}`);
         const xml = await fetchText(
-          `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`
+          `https://www.youtube.com/feeds/videos.xml?channel_id=${cid}`
         );
-        const videos = parseAtom(xml);
-
-        // Support multiple matching patterns ('games daily|kfgd|...') against
-        // either the video title or its description.
-        const patterns = (pod.titlePatterns || pod.titleIncludes || '')
-          .toLowerCase()
-          .split('|')
-          .map((s) => s.trim())
-          .filter(Boolean);
-        const matching = videos.filter((v) => {
-          const haystack = `${v.title || ''} ${v.description || ''}`.toLowerCase();
-          return patterns.some((p) => haystack.includes(p));
-        });
-
-        // Pick a display label for the episode title cleanup — first pattern works
-        const primaryNeedle = patterns[0] || '';
-        baseShape.episodes = matching.slice(0, PODCAST_EPISODES).map((v) => ({
-          title: cleanEpisodeTitle(v.title, primaryNeedle),
-          date: v.publishedAt.slice(0, 10),
-          duration: '',
-          youtubeUrl: v.url,
-          spotifyUrl: pod.spotifyUrl,
-        }));
-
-        // Always include diagnostics so we can debug when a show goes empty
-        baseShape._debug = {
-          channelId,
-          patterns,
-          totalVideos: videos.length,
-          matchedCount: matching.length,
-          recentVideoTitles: videos.slice(0, 10).map((v) => v.title),
-        };
-        return baseShape;
+        channelData.set(cid, { videos: parseAtom(xml) });
       } catch (e) {
-        baseShape.error = String(e);
-        return baseShape;
+        channelData.set(cid, { error: String(e) });
       }
     })
   );
+
+  // 3) For each podcast, filter the shared video list by patterns. Match
+  //    against TITLE ONLY (YouTube channel descriptions contain show-name
+  //    boilerplate that would otherwise over-match).
+  return PODCAST_SOURCES.map((pod) => {
+    const baseShape = {
+      id: pod.id,
+      show: pod.show,
+      accent: pod.accent,
+      coverGradient: pod.coverGradient,
+      youtubeUrl: pod.youtubeUrl,
+      spotifyUrl: pod.spotifyUrl,
+      episodes: [],
+    };
+    const channelId = handleToChannelId.get(pod.youtubeHandle);
+    if (!channelId) {
+      baseShape.error = `Could not resolve channel ID for ${pod.youtubeHandle}`;
+      return baseShape;
+    }
+    const data = channelData.get(channelId);
+    if (!data || data.error) {
+      baseShape.error = data?.error || 'No videos fetched';
+      baseShape._debug = { channelId };
+      return baseShape;
+    }
+    const videos = data.videos;
+
+    const patterns = (pod.titlePatterns || pod.titleIncludes || '')
+      .toLowerCase()
+      .split('|')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const matching = videos.filter((v) => {
+      const title = (v.title || '').toLowerCase();
+      return patterns.some((p) => title.includes(p));
+    });
+
+    const primaryNeedle = patterns[0] || '';
+    baseShape.episodes = matching.slice(0, PODCAST_EPISODES).map((v) => ({
+      title: cleanEpisodeTitle(v.title, primaryNeedle),
+      date: v.publishedAt.slice(0, 10),
+      duration: '',
+      youtubeUrl: v.url,
+      spotifyUrl: pod.spotifyUrl,
+    }));
+
+    baseShape._debug = {
+      channelId,
+      patterns,
+      totalVideos: videos.length,
+      matchedCount: matching.length,
+      recentVideoTitles: videos.slice(0, 10).map((v) => v.title),
+    };
+    return baseShape;
+  });
 }
 
 // Fetch a YouTube channel page and extract its channelId from the embedded
