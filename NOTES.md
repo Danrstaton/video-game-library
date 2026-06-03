@@ -36,7 +36,12 @@
 - Filter chips: All / In Library / Nintendo / PlayStation / Reviews / Upcoming / Hardware
 - Editorial design: Lora serif + Inter sans, dark glass aesthetic, source-colored badges
 - Custom 🎮 PWA icon (180/167/192/512), manifest.json, service worker (no real push yet)
-- **Stats page** — third TitleNav tab. Hero tiles (Played/Avg/Top50 avg/Total hours), score distribution histogram, taste profile radar, by-platform bars, by-year line chart, completion bars, score vs release-year scatter. All hand-rolled SVG, computed in computeStats(games).
+- **Stats page** — third TitleNav tab. Two hero tiles (Played / Lifetime hours), then four sections:
+  - "Score vs. release year" — horizontal stacked bars per year (2017+), tiers = Masterpiece / Amazing / Great / Played (non-Top 50).
+  - "Score vs. system" — same stacked-bar shape per platform, sorted by total played.
+  - "What you value" — predictiveness radar. For each rubric category, lift = avg(C among Masterpieces) − avg(C among non-Masterpiece Top 50). Max lift reaches outer ring; 0 sits at center. Reveals which categories actually distinguish Masterpieces (e.g. Audio and Endurance can rank higher than Narrative even when Narrative averages high overall).
+  - "Completion" — story / platinum / replayed bars (moved to bottom).
+  All hand-rolled SVG / div bars, computed in computeStats(games).
 - Backup & data sheet — consolidated import/export plus Gist sync under a single sliders icon (settings icon name)
 - Spotify integration removed (was linking wrong shows); YouTube buttons go direct to YouTube via <a target="_blank">
 - **Recommended for you** — Recommended section split into two rows:
@@ -52,7 +57,6 @@
 - Filter the stats by platform / tier / year ("show me my taste profile for just PS5 games")
 - Top franchises (would need series-tag tracking)
 - Score trend over time (would need rating-change history; not currently stored)
-- "Highest variance category" — which rubric category most distinguishes your top from bottom
 
 ## Open questions / known issues
 - IGN's games-all feed occasionally lets through entertainment crossover (e.g. Game of Thrones references). NON_GAMING_TITLE_RE in worker.js catches the common ones but isn't exhaustive.
