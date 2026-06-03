@@ -5235,10 +5235,16 @@ const normalizeNewsPayload = (payload) => {
 };
 
 // React hook: returns { news, loading, error, refresh, lastFetched }
+// Loading is initialized to true when there's no cache OR the cache is older
+// than 30 min — the latter keeps the relative-time podcast labels from
+// flashing a stale "N DAYS AGO" for what's actually still last-week's episode.
+const NEWS_STALE_MS = 30 * 60 * 1000;
 const useNews = () => {
   const initialCache = loadCachedNews();
+  const initialStale = !initialCache?._cachedAt ||
+    (Date.now() - initialCache._cachedAt > NEWS_STALE_MS);
   const [news, setNews] = useState(initialCache);
-  const [loading, setLoading] = useState(!initialCache);
+  const [loading, setLoading] = useState(!initialCache || initialStale);
   const [error, setError] = useState(null);
   const [lastFetched, setLastFetched] = useState(initialCache?._cachedAt || null);
 
@@ -6202,6 +6208,12 @@ const NewsScreen = ({ games, onSelect, tab, onTabChange }) => {
   };
 
   const showFirstLoad = loading && headlines.length === 0;
+  // Podcasts use a relative "TODAY / N DAYS AGO" label derived from the
+  // cached episode's date. If the cache is stale, the "latest" cached
+  // episode may no longer actually be the latest — showing it would briefly
+  // mislabel a 5-day-old episode as the most recent. Skeleton instead.
+  const cacheIsStale = !lastFetched || (Date.now() - lastFetched > NEWS_STALE_MS);
+  const showPodcastSkeleton = loading && (podcasts.length === 0 || cacheIsStale);
 
   return (
     <div
@@ -6236,7 +6248,7 @@ const NewsScreen = ({ games, onSelect, tab, onTabChange }) => {
       <div className="px-5 mt-6 mb-1">
         <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500 font-medium">Today's podcasts</div>
       </div>
-      {showFirstLoad ? (
+      {showPodcastSkeleton ? (
         <SkeletonPodcast />
       ) : podcasts.length === 0 ? (
         <div className="mx-4 mt-3 glass rounded-2xl p-4 text-sm text-zinc-500">No podcast episodes yet.</div>

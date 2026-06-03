@@ -32,12 +32,13 @@
 - In-app article reader (.article-body CSS), Mark as Read, 🎮 image fallback
 - GitHub Gist auto-sync backup (5 sec debounce after any library change) — including "Connect to existing Gist" flow for new-device restore
 - Pull-to-refresh on News, error boundary wrapping the app
+- News cache treated as stale after 30 min (NEWS_STALE_MS). Stale-cache mount sets loading=true so the time-sensitive "Today's podcasts" row shows a skeleton instead of flashing a "5 DAYS AGO" episode that's no longer actually the latest. Cached headlines stay visible since they're not time-labeled the same way.
 - Library matching (gold star on headlines mentioning tracked games)
 - Filter chips: All / In Library / Nintendo / PlayStation / Reviews / Upcoming / Hardware
 - Editorial design: Lora serif + Inter sans, dark glass aesthetic, source-colored badges
 - Custom 🎮 PWA icon (180/167/192/512), manifest.json, service worker (no real push yet)
 - **Stats page** — third TitleNav tab. Two hero tiles (Played / Lifetime hours), then four sections:
-  - "Score vs. release year" — horizontal stacked bars per year (2017+), tiers = Masterpiece / Amazing / Great / Played (non-Top 50).
+  - "Score vs. release year" — horizontal stacked bars per year (most-recent first, back through 2017), tiers = Masterpiece / Amazing / Great / Played (non-Top 50).
   - "Score vs. system" — same stacked-bar shape per platform, sorted by total played.
   - "What you value" — predictiveness radar. For each rubric category, lift = avg(C among Masterpieces) − avg(C among non-Masterpiece Top 50). Max lift reaches outer ring; 0 sits at center. Reveals which categories actually distinguish Masterpieces (e.g. Audio and Endurance can rank higher than Narrative even when Narrative averages high overall).
   - "Completion" — story / platinum / replayed bars (moved to bottom).
