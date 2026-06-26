@@ -1,0 +1,12 @@
+node_modules
+dist
+build
+.output
+.vite
+.turbo
+coverage
+test-results
+playwright-report
+pnpm-lock.yaml
+*.min.js
+*.min.css
