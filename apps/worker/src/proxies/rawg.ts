@@ -65,8 +65,10 @@ export async function handleRawg(
 
   // Cache key excludes the API key so identical client queries hit the same
   // edge entry. Use a stable host so the cache survives across worker URLs.
+  // v2: bumped after the next/previous key-scrub fix so any previously cached
+  // responses that still embed the RAWG key are bypassed immediately.
   const cacheKey = new Request(
-    `https://cache.vgl/rawg-v1${upstreamPath}${safeQuery ? `?${safeQuery}` : ''}`,
+    `https://cache.vgl/rawg-v2${upstreamPath}${safeQuery ? `?${safeQuery}` : ''}`,
   );
   const cache = caches.default;
   const cached = await cache.match(cacheKey);
@@ -88,6 +90,25 @@ export async function handleRawg(
       );
     }
     const body: unknown = await upstream.json();
+    // RAWG echoes the API key inside next/previous pagination URLs. Rewrite
+    // those to point back at this worker's /rawg proxy with the key removed,
+    // so the secret never reaches the client.
+    if (body && typeof body === 'object') {
+      const record = body as Record<string, unknown>;
+      for (const field of ['next', 'previous'] as const) {
+        const link = record[field];
+        if (typeof link === 'string') {
+          try {
+            const parsed = new URL(link);
+            parsed.searchParams.delete('key');
+            const proxyPath = parsed.pathname.replace(/^\/api/, '');
+            record[field] = `${url.origin}/rawg${proxyPath}${parsed.search}`;
+          } catch {
+            record[field] = null;
+          }
+        }
+      }
+    }
     const response = jsonResponse(body);
     response.headers.set('Cache-Control', `public, max-age=${RAWG_CACHE_TTL_SECONDS}`);
     ctx.waitUntil(cache.put(cacheKey, response.clone()));
