@@ -21,3 +21,6 @@ workers_dev = true
 #   wrangler secret put RAWG_API_KEY --env prod
 [env.prod.vars]
 DEBUG = "false"
+# Lock prod CORS to the codeowner's site only (overrides the built-in
+# defaults, which also allow-list the original author's GitHub Pages origin).
+ALLOWED_ORIGINS = "https://danrstaton.github.io"
